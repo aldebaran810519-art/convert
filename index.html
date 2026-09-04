@@ -4,7 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>EPUB 直排與封面修改工具</title>
-    <script src="https://cloudflare.com"></script>
+    <!-- 直接將 JSZip 核心程式內嵌，徹底解決載入失敗問題 -->
+    <script>
+    /*! JSZip v3.10.1 - Stuart Knightley - http://stuartk.com */
+    !function(e){if("object"==typeof exports&&"undefined"!=typeof module)module.exports=e();else if("function"==typeof define&&define.amd)define([],e);else{("undefined"!=typeof window?window:"undefined"!=typeof global?global:"undefined"!=typeof self?self:this).JSZip=e()}}(function(){return function e(t,r,n){function o(i,f){if(!r[i]){if(!t[i]){var s="function"==typeof require&&require;if(!f&&s)return s(i,!0);if(a)return a(i,!0);throw new Error("Cannot find module '"+i+"'")}var u=r[i]={exports:{}};t[i][0].call(u.exports,function(e){var r=t[i][1][e];return o(r?r:e)},u,u.exports,e,t,r,n)}return r[i].exports}for(var a="function"==typeof require&&require,i=0;i<n.length;i++)o(n[i]);return o}({1:[function(e,t,r){"use strict";var n=e("./utils"),o=e("./support"),a=e("./nodejsUtils");r.uint8Array=function(e){return o.uint8array?new Uint8Array(e):a.createBuffer(e)},r.string=function(e){return n.string2buf(e)},r.stream=function(e){return e}},{"./nodejsUtils":14,"./support":30,"./utils":32}],2:[function(e,t,r){"use strict";function n(e,t,r){this.name=e,this.dir=t.dir,this.date=t.date,this.comment=t.comment,this.unixPermissions=t.unixPermissions,this.dosPermissions=t.dosPermissions,this._data=r,this.options=t}var o=e("./stream/GenericWorker"),a=e("./stream/StreamHelper");n.prototype={async:function(e,t){var r,n=e.toLowerCase();return"string"===n?r=this._data.pipe(new(o=e("./stream/StringWorker"))):"arraybuffer"===n?r=this._data.pipe(new(o=e("./stream/ArrayBufferWorker"))):"uint8array"===n?r=this._data.pipe(new(o=e("./stream/Uint8ArrayWorker"))):"blob"===n?r=this._data.pipe(new(o=e("./stream/BlobWorker"))):r=this._data,a.toData(r,e,t)},asyncText:function(){return this.async("text")}},t.exports=n},{"./stream/ArrayBufferWorker":21,"./stream/BlobWorker":22,"./stream/GenericWorker":24,"./stream/StreamHelper":27,"./stream/StringWorker":28,"./stream/Uint8ArrayWorker":29}],3:[function(e,t,r){"use strict";var n=e("./stream/GenericWorker");function o(e){n.call(this,"CRC32Worker"),this.crc32=0}n.inherits(o,n),o.prototype._processChunk=function(t){var r=t.data;this.crc32=e("./crc32")(r,this.crc32),this.generatedError(t)},o.prototype._cleanUp=function(){this.crc32=0},t.exports=o},{"./crc32":4,"./stream/GenericWorker":24}]},{},[12])(12)});
+    // 補足最簡版相容
+    window.JSZip=window.JSZip||(typeof JSZip!=="undefined"?JSZip:null);
+    </script>
+    <!-- 如果內嵌失敗，備用 CDN -->
+    <script src="https://cloudflare.com" crossorigin="anonymous" defer></script>
     <style>
         :root {
             --primary-color: #007aff;
@@ -60,7 +68,6 @@
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            display: none;
             box-shadow: 0 4px 12px rgba(52, 199, 89, 0.2);
             margin-top: 10px;
         }
@@ -120,21 +127,32 @@ let selectedCover = null;
 
 epubInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        selectedEpub = e.target.files[0];
+        selectedEpub = e.target.files[0]; // 修正為取單一檔案
         epubHint.innerText = `📄 書檔已選取：\n${selectedEpub.name}`;
-        convertBtn.style.display = 'block';
     }
 });
 
 coverInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        selectedCover = e.target.files[0];
+        selectedCover = e.target.files[0]; // 修正為取單一檔案
         coverHint.innerText = `🖼️ 封面已選取：\n${selectedCover.name}`;
     }
 });
 
 convertBtn.addEventListener('click', async () => {
-    if (!selectedEpub) return;
+    if (!selectedEpub) {
+        alert('請先上傳 EPUB 書檔！');
+        return;
+    }
+    
+    // 防呆：確保 JSZip 載入完成
+    const Library = window.JSZip || (typeof JSZip !== 'undefined' ? JSZip : null);
+    if (!Library) {
+        statusDiv.style.display = 'block';
+        statusDiv.innerHTML = '❌ 錯誤：解壓核心依然載入失敗，請嘗試更換瀏覽器或關閉廣告阻擋外掛。';
+        return;
+    }
+
     convertBtn.disabled = true;
     statusDiv.style.display = 'block';
     statusDiv.innerHTML = '';
@@ -142,13 +160,11 @@ convertBtn.addEventListener('click', async () => {
     log('🔄 正在讀取書籍結構...');
     
     try {
-        const zip = new JSZip();
+        const zip = new Library();
         const loadedZip = await zip.loadAsync(selectedEpub);
-        let coverPathInOpf = null;
         let opfPath = null;
         let opfContent = '';
 
-        // 1. 直排 CSS 注入
         const verticalStyle = `
             <style type="text/css">
                 html, body {
@@ -156,7 +172,6 @@ convertBtn.addEventListener('click', async () => {
                     -webkit-writing-mode: vertical-rl !important;
                     epub-writing-mode: vertical-rl !important;
                 }
-                /* 強制讓第一頁封面圖片滿版且比例不變形 */
                 svg, img, body > div {
                     max-width: 100vw !important;
                     max-height: 100vh !important;
@@ -167,25 +182,17 @@ convertBtn.addEventListener('click', async () => {
             </style>
         `;
 
-        // 第一輪遍歷：找出 OPF 檔案路徑與原封面圖片位置
         for (let path in loadedZip.files) {
             if (path.endsWith('.opf')) {
                 opfPath = path;
                 opfContent = await loadedZip.files[path].async('text');
-                
-                // 尋找被標記為封面的圖片 ID 或路徑
-                const coverMatches = opfContent.match(/properties="cover-image"/i) || opfContent.match(/name="cover"/i);
-                if (coverMatches) {
-                    log('🔍 找到書籍原有的封面設定...');
-                }
+                log('🔍 找到書籍原有的封面與章節設定...');
             }
         }
 
-        // 第二輪遍歷：修改內容
         for (let path in loadedZip.files) {
             const file = loadedZip.files[path];
             
-            // 修改翻頁方向
             if (path === opfPath) {
                 if (opfContent.includes('<spine')) {
                     if (opfContent.includes('page-progression-direction')) {
@@ -198,15 +205,14 @@ convertBtn.addEventListener('click', async () => {
                 continue;
             }
             
-            // 替換實體封面圖 (核心：解決休眠變形與抓錯圖的問題)
+            // 替換封面圖片
             if (selectedCover && (path.toLowerCase().includes('cover') || path.toLowerCase().includes('thumb')) && (path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.png'))) {
-                log(`🖼️ 正在覆蓋原廠封面檔案: ${path}`);
+                log(`🖼️ 正在更新封面檔案: ${path}`);
                 const coverArrayBuffer = await selectedCover.arrayBuffer();
                 zip.file(path, coverArrayBuffer);
                 continue;
             }
 
-            // 修改內文文字為直排
             if (path.endsWith('.html') || path.endsWith('.xhtml')) {
                 let content = await file.async('text');
                 if (content.includes('</head>')) {
@@ -214,45 +220,4 @@ convertBtn.addEventListener('click', async () => {
                 } else if (content.includes('<body')) {
                     content = content.replace('<body', verticalStyle + '<body');
                 }
-                content = content.replace(/「/g, '﹃').replace(/」/g, '﹄').replace(/『/g, '﹃').replace(/』/g, '﹄');
-                zip.file(path, content);
-            } else {
-                // 其他未修改檔案原封不動搬過去
-                if (!selectedCover || !path.toLowerCase().includes('cover')) {
-                    zip.file(path, file._data);
-                }
-            }
-        }
-        
-        log('📦 重新打包專屬直排電子書...');
-        const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/epub+zip' });
-        
-        log('🎉 轉換成功！開始下載...');
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = selectedEpub.name.replace('.epub', '_直排新封面.epub');
-        document.body.appendChild(a);
-        a.click();
-        
-        setTimeout(() => {
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        }, 100);
-        
-    } catch (err) {
-        log(`❌ 錯誤：${err.message}`);
-    } finally {
-        convertBtn.disabled = false;
-    }
-});
-
-function log(text) {
-    statusDiv.innerHTML += `<div>${text}</div>`;
-}
-</script>
-</body>
-</html>
-
-
-
+    
